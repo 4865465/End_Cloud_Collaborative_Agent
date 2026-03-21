@@ -1,0 +1,15 @@
+{
+    "mode": "large_only",
+    "processed_count": 1305,
+    "avg_latency": 33.13618390804602,
+    "avg_large_calls": 2.488888888888889,
+    "avg_small_calls": 0.0,
+    "avg_prompt_tokens": 4690.9501915708815,
+    "avg_completion_tokens": 594.9816091954023,
+    "avg_total_tokens": 5285.931800766283,
+    "avg_llm_score": 9.189272030651342,
+    "avg_search_calls": 0.7448275862068966,
+    "avg_code_tokens": 38.20383141762452,
+    "avg_edge_to_cloud_kb": 2.96312036039272,
+    "avg_cloud_to_edge_kb": 1.4709493235153257
+}
