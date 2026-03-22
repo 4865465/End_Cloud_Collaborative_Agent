@@ -76,7 +76,7 @@ class ReactAgent:
         self.experience_summary_pattern = r"Experience Summary:\s*(.*)"
 
 
-    def _construct_prompt(self, user_query: str, history: List[Dict[str, str]], experience: str = None, similar_query: str = None, reference_type: str = "experience") -> List[Dict[str, str]]:
+    def _construct_prompt(self, user_query: str, history: List[Dict[str, str]], experience: str = None, reference_type: str = "experience") -> List[Dict[str, str]]:
         tool_names = list(self.registry.tools.keys())
         tool_strings = "\n".join([f"{name}: {tool.description}" for name, tool in self.registry.tools.items()])
         
@@ -107,7 +107,7 @@ class ReactAgent:
         )
         
         # Add reference guidance based on similarity level if experience provided
-        if experience and similar_query:
+        if experience:
             if reference_type == "trace":
                 reference_instruction = (
                     "The system has detected that this user intent has occurred before with VERY HIGH similarity. "
@@ -126,7 +126,6 @@ class ReactAgent:
             system_prompt += (
                 f"\n\n[REFERENCE: SIMILAR PAST EXPERIENCE]\n"
                 f"{reference_instruction}\n"
-                f"- Previous Intent: {similar_query}\n"
                 f"- Experience:\n{experience}\n"
             )
             
@@ -282,7 +281,7 @@ class ReactAgent:
             err_dict = {"status": "error", "message": f"Error executing tool {action}: {str(e)}"}
             return json.dumps(err_dict, ensure_ascii=False)
 
-    def run(self, user_query: str, history: List[Dict[str, str]] = [], experience: str = None, similar_query: str = None, reference_type: str = "experience") -> Dict[str, Any]:
+    def run(self, user_query: str, history: List[Dict[str, str]] = [], experience: str = None, reference_type: str = "experience") -> Dict[str, Any]:
         """执行 ReAct 循环 (Aligned with Baseline1 structure)"""
         # 端↔云通信统计（以UTF-8字节数精确记录）
         transfer_stats = {"s2l": 0, "l2s": 0}
@@ -301,7 +300,7 @@ class ReactAgent:
             except Exception:
                 transfer_stats["s2l"] += len(str(user_query).encode('utf-8')) + len(str(history).encode('utf-8'))
 
-        messages = self._construct_prompt(user_query, history, experience, similar_query, reference_type)
+        messages = self._construct_prompt(user_query, history, experience, reference_type)
         trace = []
         current_step = 0
         final_answer = ""

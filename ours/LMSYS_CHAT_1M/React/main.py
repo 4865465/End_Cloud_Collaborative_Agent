@@ -175,7 +175,7 @@ def run_pipeline(sample_size: int = None, eval_enabled: bool = True):
                             "retrieved_score": float(best_match['score']),
                             "category": 0
                         }
-                        res_small = agent_small.run(user_query, history, experience=exp_param.strip(), similar_query=best_match['query'], reference_type=("trace" if best_match.get("action") == "trace" else "experience"))
+                        res_small = agent_small.run(user_query, history, experience=exp_param.strip(), reference_type=("trace" if best_match.get("action") == "trace" else "experience"))
                         final_res = res_small
                         small_calls += res_small.get('total_calls', 0)
                     else:
