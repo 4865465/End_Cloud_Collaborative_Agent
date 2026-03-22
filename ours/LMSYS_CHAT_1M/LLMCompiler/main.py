@@ -8,13 +8,15 @@ from tqdm import tqdm
 from config import (
     LARGE_MODEL_API_KEY, LARGE_MODEL_API_BASE, LARGE_MODEL_NAME,
     SMALL_MODEL_API_KEY, SMALL_MODEL_API_BASE, SMALL_MODEL_NAME,
-    SAMPLE_SIZE_Multi, SAMPLE_SIZE_Single, EXPERIENCE_SIMILARITY_THRESHOLD
+    SAMPLE_SIZE_Multi, SAMPLE_SIZE_Single, 
+    SIMILARITY_THRESHOLD_1, SIMILARITY_THRESHOLD_2, 
+    FAILURE_SCORE_THRESHOLD, FAILURE_EXPERIENCE_UPDATE
 )
 from dataset_utils import load_lmsys_chat_1m, split_conversation_into_tasks
 from llm_client import LLMClient
 from agent import LLMCompileAgent
 from evaluation import Evaluator
-from experience_db import ExperienceDB, analyze_task, generate_experience_summary
+from experience_db import ExperienceDB, analyze_task, reflect_on_failure
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -102,6 +104,7 @@ def run_pipeline(mode: str, sample_size: int = None, eval_enabled: bool = True):
                 history = task['history']
                 
                 used_experience = ""
+                exp_data = None
                 routing_large_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
                 
                 # 1. Analyze task complexity
@@ -118,21 +121,43 @@ def run_pipeline(mode: str, sample_size: int = None, eval_enabled: bool = True):
                 if category == 1:
                     # Simple task -> Small model
                     logger.info(f"Task {task['task_id']} is SIMPLE. Using small model.")
-                    current_agent = LLMCompileAgent(plan_llm=small_llm, exec_llm=small_llm)
+                    current_agent = LLMCompileAgent(plan_llm=small_llm, exec_llm=small_llm, generate_experience=False)
                     current_method = "small_only (simple)"
                 else:
                     # Complex task -> Search DB
                     main_s2l_bytes += len(refined_query.encode('utf-8'))
-                    found, exp_data = db.search(refined_query, EXPERIENCE_SIMILARITY_THRESHOLD)
+                    # 创新点1 - 分层轨迹检索
+                    found, exp_data = db.search(refined_query, SIMILARITY_THRESHOLD_1, SIMILARITY_THRESHOLD_2)
                     if found:
-                        logger.info(f"Task {task['task_id']} is COMPLEX. Experience found (score: {exp_data['score']:.2f}). Using small model with experience.")
-                        used_experience = exp_data.get("experience", "")
-                        main_l2s_bytes += len(used_experience.encode('utf-8'))
-                        current_agent = LLMCompileAgent(plan_llm=small_llm, exec_llm=small_llm)
-                        current_method = "small_only (experience_retrieved)"
+                        current_agent = LLMCompileAgent(plan_llm=small_llm, exec_llm=small_llm, generate_experience=False)
+                        
+                        if exp_data["action"] == "trace":
+                            # 创新点1 - 在 main.py 中进行 Trace 过滤，仅保留 Planner Output 和 Final Answer
+                            raw_trace = exp_data.get("trace", [])
+                            filtered_trace = [s for s in raw_trace if s.get("step") in ["Planner Output", "Final Answer"]]
+                            
+                            # 构造包含反射内容的字符串
+                            trace_json = json.dumps(filtered_trace, ensure_ascii=False)
+                            used_experience = f"Action: trace\nTrace: {trace_json}"
+                            # 统计下传字节
+                            main_l2s_bytes += len(used_experience.encode('utf-8'))
+                            
+                            logger.info(f"Task {task['task_id']} matched TRACE (sim: {exp_data['score']:.2f}).")
+                            current_method = "small_only (hierarchical_trace_retrieved)"
+                        else:
+                            # 仅下传总结字符串和反射
+                            summary = exp_data.get("experience", "")
+                            reflection = exp_data.get("reflection", "")
+                            used_experience = f"Action: experience\nSummary: {summary}"
+                            if reflection:
+                                used_experience += f"\nReflection: {reflection}"
+                            
+                            main_l2s_bytes += len(used_experience.encode('utf-8'))
+                            logger.info(f"Task {task['task_id']} matched EXPERIENCE (sim: {exp_data['score']:.2f}).")
+                            current_method = "small_only (hierarchical_exp_retrieved)"
                     else:
                         logger.info(f"Task {task['task_id']} is COMPLEX. No experience found. Using large model.")
-                        current_agent = LLMCompileAgent(plan_llm=large_llm, exec_llm=large_llm)
+                        current_agent = LLMCompileAgent(plan_llm=large_llm, exec_llm=large_llm, generate_experience=True)
                         current_method = "large_only (fallback)"
                 
                 result = current_agent.run(user_query, history, experience=used_experience)
@@ -163,17 +188,27 @@ def run_pipeline(mode: str, sample_size: int = None, eval_enabled: bool = True):
                     llm_score = eval_res.get('llm_score', 0.0)
                 
                 # 2. Learn from large model successful traces
-                if current_method == "large_only (fallback)" and llm_score > 8.0:
-                    logger.info(f"Task {task['task_id']} (Large Model) scored {llm_score}. Generating experience summary...")
-                    # Filter out large tool outputs to reduce context overhead for summary generation
-                    filtered_trace = [s for s in result.get('trace', []) if "Tool Output" not in s.get('step', '')]
-                    exp_summary, summary_usage = generate_experience_summary(large_llm, user_query, filtered_trace, history)
-                    for k in routing_large_usage: routing_large_usage[k] += summary_usage.get(k, 0)
-                    large_calls += 1
-                    
+                if current_method == "large_only (fallback)":
+                    exp_summary = result.get('experience_summary')
                     if exp_summary:
                         db.add_experience(user_query, result.get('trace', []), exp_summary)
                         logger.info(f"Experience added to DB for Task {task['task_id']}.")
+
+                # 创新点3 - 失败经验更新
+                elif FAILURE_EXPERIENCE_UPDATE and "hierarchical" in current_method and llm_score < FAILURE_SCORE_THRESHOLD:
+                    logger.info(f"Task {task['task_id']} failed with score {llm_score} using experience. Generating failure reflection...")
+                    # ref_exp = 检索到的参考经验或轨迹内容
+                    ref_exp_content = exp_data.get("experience") if exp_data.get("action") == "experience" else str(exp_data.get("trace"))
+                    reflection_text, ref_usage = reflect_on_failure(large_llm, user_query, ref_exp_content, result.get('trace', []), llm_score)
+                    
+                    if reflection_text:
+                        db.update_reflection(exp_data["query"], reflection_text)
+                        logger.info(f"Failure reflection added to DB for query: {exp_data['query']}")
+                        
+                        # Add large model usage for reflection
+                        for k in routing_large_usage:
+                            routing_large_usage[k] += ref_usage.get(k, 0)
+                        large_calls += 1
                 
                 # Combine routing/summary usage with agent usage
                 for k in total_usage:

@@ -65,6 +65,29 @@ TOOLS_CONFIG = {
     }
 }
 
+# Hybrid Strategy Config
+SIMILARITY_THRESHOLD_1 = 0.8 # Threshold to return original trace
+SIMILARITY_THRESHOLD_2 = 0.6 # Threshold to return experience
+FAILURE_SCORE_THRESHOLD = 4.0 # Threshold below which an experience needs reflection
+
+# Innovation Toggles (创新点开关)
+# 创新点1：使用分层的轨迹检索
+# 为True时：sim > T1 -> 原始轨迹; T2 < sim <= T1 -> 抽象经验; sim <= T2 -> 大模型
+# 为False时：sim > T2 -> 抽象经验; sim <= T2 -> 大模型
+HIERARCHICAL_TRAJECTORY_RETRIEVAL = True
+
+# 创新点2：工具记忆库
+# 为True时：通过检索相似度，如果大于阈值，不执行工具而直接返回库中结果
+# 为False时：不使用工具库，直接真实调用API
+TOOL_MEMORY_LIBRARY = True
+
+# 创新点3：失败经验更新
+# 为True时：如果发现经验效果不好，调用大模型对该经验进行修改或追加注意事项
+# 为False时：生成的经验是静止的，不进行修改
+FAILURE_EXPERIENCE_UPDATE = True
+
+TOOL_SIMILARITY_THRESHOLD = 0.8 # Threshold for tool input similarity
+
 # Embedding Settings
 EMBEDDING_API_KEY = os.getenv("PPINFRA_API_KEY")
 EMBEDDING_API_BASE = os.getenv("PPINFRA_API_BASE")
@@ -72,4 +95,3 @@ EMBEDDING_API_BASE = os.getenv("PPINFRA_API_BASE")
 EMBEDDING_MODEL = "qwen/qwen3-embedding-0.6b"
 EMBEDDING_USE_LOCAL = False
 EMBEDDING_GPU_ID = 0
-EXPERIENCE_SIMILARITY_THRESHOLD = 0.6  # Threshold for retrieving past successful experiences

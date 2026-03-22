@@ -157,10 +157,7 @@ def run_pipeline(sample_size: int = None, eval_enabled: bool = True):
                             trace_str = json.dumps(best_match['trace'], ensure_ascii=False)
                             cloud_to_edge_bytes += len(trace_str.encode('utf-8'))
                             logger.info(f"Similarity {best_match['score']:.2f} > {SIMILARITY_THRESHOLD_1}. Passing trace to small model.")
-                            
-                            if reflection:
-                                cloud_to_edge_bytes += len(reflection.encode('utf-8'))    
-                            exp_param = f"{trace_str}\n\n{reflection_str}"
+                            exp_param = f"{trace_str}\n"
                             method = "hybrid_small_with_trace"
                         else:
                             cloud_to_edge_bytes += len(best_match['experience'].encode('utf-8'))

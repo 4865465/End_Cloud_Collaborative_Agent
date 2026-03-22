@@ -95,8 +95,18 @@ class ExperienceDB:
         })
         self.save_db()
         
+    def update_reflection(self, query: str, reflection: str) -> None:
+        for rec in self.records:
+            if rec["query"] == query:
+                if rec.get("reflection"):
+                    rec["reflection"] += "\n" + reflection
+                else:
+                    rec["reflection"] = reflection
+                self.save_db() # Refresh JSON
+                break
 
-    def search_by_emb(self, query_emb: np.ndarray, threshold1: float) -> Tuple[bool, Dict[str, Any]]:
+    def search_by_emb(self, query_emb: np.ndarray, threshold1: float, threshold2: float) -> Tuple[bool, Dict[str, Any]]:
+        from config import HIERARCHICAL_TRAJECTORY_RETRIEVAL
         if not self.records or self.index.ntotal == 0:
             return False, {}
 
@@ -113,21 +123,42 @@ class ExperienceDB:
             return False, {}
             
         best_record = self.records[best_idx]
-        if best_score > threshold1:
-            return True, {
-                "action": "experience",
-                "score": best_score,
-                "query": best_record.get("query", ""),
-                "trace": best_record.get("trace", []),
-                "experience": best_record.get("experience", ""),
-                "reflection": best_record.get("reflection", "")
-            }
+        
+        if HIERARCHICAL_TRAJECTORY_RETRIEVAL:
+            if best_score > threshold1:
+                return True, {
+                    "action": "trace",
+                    "score": best_score,
+                    "query": best_record.get("query", ""),
+                    "trace": best_record.get("trace", []),
+                    "experience": best_record.get("experience", ""),
+                    "reflection": best_record.get("reflection", "")
+                }
+            elif best_score > threshold2:
+                return True, {
+                    "action": "experience",
+                    "score": best_score,
+                    "query": best_record.get("query", ""),
+                    "trace": best_record.get("trace", []),
+                    "experience": best_record.get("experience", ""),
+                    "reflection": best_record.get("reflection", "")
+                }
+        else:
+            if best_score > threshold2:
+                return True, {
+                    "action": "experience",
+                    "score": best_score,
+                    "query": best_record.get("query", ""),
+                    "trace": best_record.get("trace", []),
+                    "experience": best_record.get("experience", ""),
+                    "reflection": best_record.get("reflection", "")
+                }
             
         return False, {}
 
-    def search(self, query: str, threshold1: float) -> Tuple[bool, Dict[str, Any]]:
+    def search(self, query: str, threshold1: float, threshold2: float) -> Tuple[bool, Dict[str, Any]]:
         query_emb = self.encoder.encode_single(query)
-        return self.search_by_emb(query_emb, threshold1)
+        return self.search_by_emb(query_emb, threshold1, threshold2)
 
 
 
@@ -256,3 +287,27 @@ def analyze_task(llm, query: str, history: List[Dict[str, str]]) -> Tuple[str, i
     except Exception as e:
         print(f"Failed to analyze task: {e}")
         return query, 0, {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+
+def reflect_on_failure(large_llm, query: str, ref_exp: str, trace: Any, score: float) -> Tuple[str, Dict[str, Any]]:
+    trace_str = json.dumps(trace, ensure_ascii=False, indent=2)
+    prompt = (
+        f"You are an expert AI agent. A small model was tasked to solve a user query.\n"
+        f"It was provided with a reference past experience/trace, but it still failed and achieved a low score of {score}.\n"
+        f"User Query: {query}\n"
+        f"Reference Experience provided to small model: {ref_exp}\n"
+        f"Small Model's Execution Trace: \n{trace_str}\n\n"
+        f"Your task is to analyze why the small model failed despite the reference. "
+        f"Provide a concise, highly actionable 'Reflection' addressing the gap or common pitfall "
+        f"so that future executions will avoid this mistake.\n\n"
+        f"Reflection:</no_think>"
+    )
+    try:
+        messages = [{"role": "user", "content": prompt}]
+        res = large_llm.generate(messages, max_tokens=600)
+        text = res.get("content", "")
+        text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+        usage = res.get("usage", {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0})
+        return text, usage
+    except Exception as e:
+        print(f"Failed to generate reflection: {e}")
+        return "", {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}

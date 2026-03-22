@@ -15,6 +15,8 @@ from typing_extensions import TypedDict, Annotated
 
 from output_parser import LLMCompilerPlanParser, Task
 from tools import WebSearchTool, CalculatorTool, GetCurrentDateTool, CodeGeneratorTool, LLMInferenceTool
+from tool_db import ToolMemoryDB
+from config import TOOL_MEMORY_LIBRARY, TOOL_SIMILARITY_THRESHOLD
 
 class State(TypedDict):
     messages: Annotated[list, add_messages]
@@ -94,13 +96,15 @@ IMPORTANT:
 </no_think>
 """.strip()
 
-    def __init__(self, plan_llm, exec_llm, max_iterations: int = 3, experience: str = ""):
+    def __init__(self, plan_llm, exec_llm, max_iterations: int = 3, experience: str = "", generate_experience: bool = False):
         self.plan_llm = plan_llm
         self.exec_llm = exec_llm
         self.max_iterations = max_iterations
         self._replan_count = 0
         self._plan_round_counter = 0
         self.experience = experience
+        self.generate_experience = generate_experience
+        self.tool_db = ToolMemoryDB()
 
         self.search_tool = WebSearchTool()
         self.calculator_tool = CalculatorTool()
@@ -224,11 +228,50 @@ IMPORTANT:
                 messages_str.append(f"{msg.type.capitalize()}: {msg.content}")
                 i += 1
 
-        # Use experience summary if provided
+        # Innovation 1 - Hierarchical Trajectory Retrieval Support
         exp_header = ""
         if self.experience:
-            exp_header = f"Relevant Experience Found:\n{self.experience}\n"
+            if "Action: trace" in self.experience:
+                # Trace level match
+                trace_part = ""
+                reflection_part = ""
+                for line in self.experience.split("\n"):
+                    if line.startswith("Trace: "):
+                        trace_part = line[7:].strip()
+                    elif line.startswith("Reflection: "):
+                        reflection_part = line[12:].strip()
+                
+                exp_header = (
+                    f"\n\n[REFERENCE: VERY HIGH SIMILARITY TRACE]\n"
+                    f"The system has detected that this user intent has occurred before with VERY HIGH similarity. "
+                    f"Please carefully review the 'Recorded Trace' (containing Planner Output and Final Answer) below.\n"
+                    f"Decide if the recorded 'Planner Output' and 'Final Answer' are sufficient to address the CURRENT user question. "
+                    f"If NO additional tools or info are needed, strictly SKIP all tasks and output ONLY: '1. join()<END_OF_PLAN>'.\n"
+                    f"- Recorded Trace:\n{trace_part}\n"
+                )
+                if reflection_part:
+                    exp_header += f"\n- CRITICAL FAILURE NOTES (Avoid these mistakes):\n{reflection_part}\n"
+            else:
+                # Experience level match
+                summary_part = ""
+                reflection_part = ""
+                for line in self.experience.split("\n"):
+                    if line.startswith("Summary: "):
+                        summary_part = line[9:].strip()
+                    elif line.startswith("Reflection: "):
+                        reflection_part = line[12:].strip()
+                
+                exp_header = (
+                    f"\n\n[REFERENCE: SIMILAR PAST EXPERIENCE]\n"
+                    f"The system has detected that this user intent has occurred before. "
+                    f"Please refer to the following abstracted experience as a guide.\n"
+                    f"- Experience Summary:\n{summary_part}\n"
+                )
+                if reflection_part:
+                    exp_header += f"\n- CRITICAL FAILURE NOTES (Avoid these mistakes):\n{reflection_part}\n"
             
+            exp_header += "\n"
+
         prompt_text = self.PROMPT_TEMPLATE.format(
             num_tools=len(self.tools) + 1,
             tool_descriptions=tool_descriptions,
@@ -335,6 +378,13 @@ IMPORTANT:
         if action_name == "web_search":
             self.search_calls += 1
             
+        # 创新点2 - 工具记忆库 (Tool Memory Library)
+        if TOOL_MEMORY_LIBRARY and action_name in ["web_search", "code_generator"]:
+            found, cached_output = self.tool_db.search(action_name, str(action_input), TOOL_SIMILARITY_THRESHOLD)
+            if found:
+                print(f"--- 工具调用被工具记忆库拦截: {action_name} ---")
+                return cached_output
+            
         input_tokens_est = 0
         if action_name == "code_generator":
             prompt_text = resolved_args.get("prompt", str(resolved_args)) if isinstance(resolved_args, dict) else str(resolved_args)
@@ -380,6 +430,18 @@ IMPORTANT:
                     final_res = json.dumps(result, ensure_ascii=False)
             else:
                 final_res = str(result)
+
+            # 创新点2 - 工具记忆库库更新
+            if TOOL_MEMORY_LIBRARY and action_name in ["web_search", "code_generator"]:
+                # 仅在非空且成功时存储
+                is_valid = True
+                if isinstance(result, dict) and result.get("status") in ["failed", "error"]:
+                    is_valid = False
+                if not final_res.strip() or final_res.strip() == "{}":
+                    is_valid = False
+                
+                if is_valid:
+                    self.tool_db.add_record(action_name, str(action_input), final_res)
             
             print(f"<<< [Tool Output] Task {task.get('idx', '?')} | Tool: {action_name} executed successfully.")
             print(f"Result: {final_res[:500]}{'...' if len(final_res) > 500 else ''}\n")
@@ -494,14 +556,26 @@ CRITICAL FOCUS REQUIREMENT - READ THIS CAREFULLY:
 - CRITICAL REPLANNING RULE: When you do not get the desired result from a tool, please check the tool's input ("Args"). If the tool's input is appropriate, then the issue is caused by the tool and is unrelated to the plan. In this case, you should directly return the answer to the user based on available information. Otherwise, if you need to obtain different information, perform replan again.
 """
         
-        format_instruction = """
-CRITICAL FORMAT REQUIREMENTS - YOU MUST USE THE FOLLOWING JSON FORMAT:
-You MUST return a JSON object (and ONLY a JSON object) with TWO parameters:
-1. "thought": A clear explanation of why you have enough info or why you need to go back to the planner.
-2. "action": An object containing exactly ONE of the following fields:
-   - "response": Your direct, helpful answer to the user's question.
-   - "feedback": Specific and actionable instructions for the planner to generate a better plan.
-
+        if self.generate_experience:
+            experience_instruction = """
+3. "experience": (OPTIONAL) If you are providing a "response", you MUST also generate a single-sentence experience summary for this task. 
+   - Formula: "If the user purpose is [Intent], then the workflow should be [Specific Tool Sequence & Dependencies]."
+   - Example: "If the user purpose is to find and summarize recent AI news, then the workflow should be to simultaneously run web_search for news, then use llm_inference on search results to finalize."
+   - This experience will be used to help future agents solve similar tasks more efficiently.
+"""
+            example_final = """
+Example FinalResponse with Experience:
+{
+  "thought": "I have all the information needed.",
+  "action": {
+    "response": "The answer is ..."
+  },
+  "experience": "If the user purpose is [Intent], then the workflow should be [Specific Tool Sequence & Dependencies]."
+}
+"""
+        else:
+            experience_instruction = ""
+            example_final = """
 Example FinalResponse:
 {
   "thought": "I have all the information needed.",
@@ -509,21 +583,60 @@ Example FinalResponse:
     "response": "The answer is ..."
   }
 }
+"""
 
+        format_instruction = f"""
+CRITICAL FORMAT REQUIREMENTS - YOU MUST USE THE FOLLOWING JSON FORMAT:
+You MUST return a JSON object (and ONLY a JSON object) with these parameters:
+1. "thought": A clear explanation of why you have enough info or why you need to go back to the planner.
+2. "action": An object containing exactly ONE of the following fields:
+   - "response": Your direct, helpful answer to the user's question.
+   - "feedback": Specific and actionable instructions for the planner to generate a better plan.
+{experience_instruction}
+{example_final}
 Example Replan:
-{
+{{
   "thought": "I need more information about X.",
-  "action": {
+  "action": {{
     "feedback": "Please search for more details about X"
-  }
-}
+  }}
+}}
 """
         
         obs_str = "\n\n".join(observations)
-        joiner_prompt = f"""Based on the provided observations, generate the final answer to the user's query if possible, or decide if more planning is needed.
+        
+        # Innovation 1 - Joiner Hierarchical Reference Support
+        exp_header = ""
+        if self.experience:
+            if "Action: trace" in self.experience:
+                trace_part = ""
+                reflection_part = ""
+                for line in self.experience.split("\n"):
+                    if line.startswith("Trace: "):
+                        trace_part = line[7:].strip()
+                    elif line.startswith("Reflection: "):
+                        reflection_part = line[12:].strip()
+                exp_header = f"\n[HIGH SIMILARITY REFERENCE TRACE]\n{trace_part}\n"
+                if reflection_part:
+                    exp_header += f"\n[CRITICAL REFLECTION NOTES]\n{reflection_part}\n"
+            else:
+                summary_part = ""
+                reflection_part = ""
+                for line in self.experience.split("\n"):
+                    if line.startswith("Summary: "):
+                        summary_part = line[9:].strip()
+                    elif line.startswith("Reflection: "):
+                        reflection_part = line[12:].strip()
+                exp_header = f"\n[REFERENCE EXPERIENCE]\n{summary_part}\n"
+                if reflection_part:
+                    exp_header += f"\n[CRITICAL REFLECTION NOTES]\n{reflection_part}\n"
+
+        joiner_prompt = f"""Based on the provided observations and reference information, generate the final answer to the user's query if possible, or decide if more planning is needed.
 User query: {user_question}
 Observations:
 {obs_str}
+
+{exp_header}
 
 {focus_instruction}
 
@@ -532,6 +645,8 @@ Observations:
 """
         
         response_text = self._call_llm(self.plan_llm, [HumanMessage(content=joiner_prompt)])
+        self._last_experience = None
+
         try:
             # First, try standard JSON loading
             match = re.search(r"(\{.*\})", response_text, re.DOTALL)
@@ -551,10 +666,13 @@ Observations:
                 thought_match = re.search(r'"thought":\s*"(.*?)"', response_text, re.DOTALL)
                 response_match = re.search(r'"response":\s*"(.*?)"', response_text, re.DOTALL)
                 feedback_match = re.search(r'"feedback":\s*"(.*?)"', response_text, re.DOTALL)
+                experience_match = re.search(r'"experience":\s*"(.*?)"', response_text, re.DOTALL)
                 
                 thought = thought_match.group(1) if thought_match else "Analyzing facts."
                 if response_match:
                     parsed = {"thought": thought, "action": {"response": response_match.group(1)}}
+                    if experience_match:
+                        parsed["experience"] = experience_match.group(1)
                 elif feedback_match:
                     parsed = {"thought": thought, "action": {"feedback": feedback_match.group(1)}}
                 else:
@@ -562,6 +680,8 @@ Observations:
 
             thought = parsed.get("thought", "Analyzing the results.")
             action = parsed.get("action", {})
+            self._last_experience = parsed.get("experience")
+            
             response_msgs = [AIMessage(content=f"Thought: {thought}")]
             
             if "response" in action:
@@ -599,6 +719,22 @@ Observations:
         if not observations:
             obs_str = "No task execution results are available."
             
+        experience_instruction = ""
+        if self.generate_experience:
+            experience_instruction = """
+CRITICAL FORMAT REQUIREMENTS - YOU MUST USE THE FOLLOWING JSON FORMAT:
+You MUST return a JSON object (and ONLY a JSON object) with TWO parameters:
+1. "response": Your direct, helpful answer to the user's question.
+2. "experience": Your single-sentence experience summary for this task. 
+   - Formula: "If the user purpose is [Intent], then the workflow should be [Specific Tool Sequence & Dependencies]."
+
+Example:
+{
+  "response": "The answer is ...",
+  "experience": "If the user purpose is [Intent], then the workflow should be [Specific Tool Sequence & Dependencies]."
+}
+"""
+
         final_answer_prompt = f"""
 CRITICAL FOCUS REQUIREMENT - READ THIS CAREFULLY:
 - Your PRIMARY goal is to answer the USER'S CURRENT QUESTION directly and accurately.
@@ -615,16 +751,37 @@ USER'S CURRENT QUESTION (THIS IS YOUR PRIMARY FOCUS):
 OBSERVATIONS FROM TASKS (THESE ARE ONLY SUPPORTING INFORMATION):
 {obs_str}
 
-Please generate a complete and accurate final answer to the user's question above. Focus on directly answering what the user asked. The observations are only there to help you - your main job is to answer the user's question clearly and directly.
+Please generate a complete and accurate final answer to the user's question above. 
 
-Please return your answer directly without any additional formatting instructions or meta-talk.
+{experience_instruction}
 </no_think>
 """
         response_text = self._call_llm(self.plan_llm, [HumanMessage(content=final_answer_prompt)])
+        
+        final_answer = response_text
+        if self.generate_experience:
+            try:
+                # Try JSON extraction
+                match = re.search(r"(\{.*\})", response_text, re.DOTALL)
+                if match:
+                    parsed = json.loads(match.group(1))
+                    final_answer = parsed.get("response", response_text)
+                    self._last_experience = parsed.get("experience")
+                else:
+                    # Regex extraction fallback
+                    response_match = re.search(r'"response":\s*"(.*?)"', response_text, re.DOTALL)
+                    experience_match = re.search(r'"experience":\s*"(.*?)"', response_text, re.DOTALL)
+                    if response_match:
+                        final_answer = response_match.group(1)
+                    if experience_match:
+                        self._last_experience = experience_match.group(1)
+            except Exception:
+                pass
+
         return {
             "messages": [
                 AIMessage(content="Thought: Maximum replan limit reached, generating final answer based on all executed tasks' results."),
-                AIMessage(content=response_text)
+                AIMessage(content=final_answer)
             ]
         }
 
@@ -664,6 +821,7 @@ Please return your answer directly without any additional formatting instruction
         self.plan_l2s_bytes = 0
         self.search_calls = 0
         self.code_tokens = 0
+        self._last_experience = None
         
         # 端↔云通信统计（以UTF-8字节数精确记录）
         # 初始上传仅统计 query 和 history，系统提示词通常预置在云端。
@@ -727,5 +885,6 @@ Please return your answer directly without any additional formatting instruction
             "total_calls": self.llm_calls,
             "transfer_stats": {"s2l": self.plan_s2l_bytes, "l2s": self.plan_l2s_bytes},
             "search_calls": getattr(self, "search_calls", 0),
-            "code_tokens": getattr(self, "code_tokens", 0)
+            "code_tokens": getattr(self, "code_tokens", 0),
+            "experience_summary": getattr(self, "_last_experience", None)
         }
