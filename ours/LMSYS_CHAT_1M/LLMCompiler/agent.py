@@ -178,6 +178,14 @@ IMPORTANT:
         tool_descriptions = "\\n".join(f"{i+1}. {tool.name}: {tool.description}" for i, tool in enumerate(self.tools))
         
         messages = state["messages"]
+        
+        # Calculate current next task ID once for all prompts
+        next_task_id = 1
+        for message in messages[::-1]:
+            if isinstance(message, FunctionMessage):
+                next_task_id = message.additional_kwargs.get("idx", 0) + 1
+                break
+
         replan = ""
         if len(messages) > 0 and isinstance(messages[-1], SystemMessage) and "Context from last attempt" in messages[-1].content:
             replan = (' - You are given "Previous Plan" which is the plan that the previous agent created along with the execution results '
@@ -186,28 +194,23 @@ IMPORTANT:
                       ' - When starting the Current Plan, you should start with "Thought" that outlines the strategy for the next plan.\\n'
                       " - CRITICAL PLAN LIMITATION: You are an efficient AI assistant. You MUST ensure that the next plan contains NO MORE THAN 3 tasks (excluding the final join() call)!!!\\n"
                       " - MAXIMUM 3 TASKS PER PLAN - This is a HARD LIMIT. Do NOT exceed 3 tasks in the Current Plan.\\n"
+                      f" - IMPORTANT: Your Current Plan MUST start counting from task ID: {next_task_id}\\n"
                       " - Count your tasks: 1, 2, 3, then join(). NO MORE THAN 3 TASKS!!!\\n"
                       " - Focus on the most essential actions to provide concise, effective solutions.\\n"
                       " - REMINDER: Before creating your Current Plan, verify that it will have NO MORE THAN 3 tasks (plus join()).\\n"
                       " - CRITICAL: In the Current Plan, you MUST NEVER repeat the actions that are already executed in the Previous Plan. "
                       "All tasks from Previous Plan have already been executed and their results are available as Observations. \\n"
                       " - CRITICAL TASK NUMBERING: You MUST continue the task index from the end of the previous plan. "
-                      "If the Previous Plan ended at task ID N, your Current Plan MUST start from task ID N+1. "
+                      f"The Previous Plan ended at task ID {next_task_id - 1}, so your Current Plan MUST start from task ID {next_task_id}. "
                       "DO NOT restart numbering from 1. DO NOT repeat task indices. "
-                      "The task IDs must be continuous across the entire conversation. For example, if Previous Plan ended at task 2, "
-                      "your Current Plan MUST start from task 3, then 4, 5, etc.\\n"
+                      "The task IDs must be continuous across the entire conversation.\\n"
                       " - CRITICAL TOOL USAGE: You MUST ONLY use the tools that are provided in the tool list above. "
                       "DO NOT invent new tool names or use tools that are not listed. "
                       "Check the tool list carefully and use ONLY the exact tool names that are available. "
                       " - CRITICAL: Ensure every task in Current Plan follows the exact format: 'ID. tool_name(arguments)' with valid tool names and proper Python syntax.</no_think>")
 
-            next_task = 0
-            for message in messages[::-1]:
-                if isinstance(message, FunctionMessage):
-                    next_task = message.additional_kwargs.get("idx", 0) + 1
-                    break
-            if next_task > 0:
-                messages[-1].content += f" - Begin counting at : {next_task}"
+            # Append the start ID to the system message content for extra visibility
+            messages[-1].content += f" - Begin counting at task ID: {next_task_id}"
                 
         messages_str = []
         i = 0
@@ -243,7 +246,7 @@ IMPORTANT:
                     f"The system has detected that this user intent has occurred before with VERY HIGH similarity. "
                     f"Please carefully review the 'Recorded Trace' (containing Planner Output and Final Answer) below.\n"
                     f"Decide if the recorded 'Planner Output' and 'Final Answer' are sufficient to address the CURRENT user question. "
-                    f"If NO additional tools or info are needed, strictly SKIP all tasks and output ONLY: '1. join()<END_OF_PLAN>'.\n"
+                    f"If NO additional tools or info are needed, strictly SKIP all tasks and output ONLY: '{next_task_id}. join()<END_OF_PLAN>'.\n"
                     f"- Recorded Trace:\n{trace_part}\n"
                 )
             else:
@@ -370,15 +373,15 @@ IMPORTANT:
         print(f"\n>>> [Tool Input] Task {task.get('idx', '?')} | Tool: {action_name}")
         print(f"Arguments: {action_input}")
             
-        if action_name == "web_search":
-            self.search_calls += 1
-            
         # 创新点2 - 工具记忆库 (Tool Memory Library)
         if TOOL_MEMORY_LIBRARY and action_name in ["web_search", "code_generator"]:
             found, cached_output = self.tool_db.search(action_name, str(action_input), TOOL_SIMILARITY_THRESHOLD)
             if found:
                 print(f"--- 工具调用被工具记忆库拦截: {action_name} ---")
                 return cached_output
+                
+        if action_name == "web_search":
+            self.search_calls += 1
             
         input_tokens_est = 0
         if action_name == "code_generator":
