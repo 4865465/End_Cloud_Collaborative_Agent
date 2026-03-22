@@ -217,7 +217,7 @@ def run_pipeline(sample_size: int = None, eval_enabled: bool = True):
                     if evaluator and llm_score < FAILURE_SCORE_THRESHOLD:
                         small_trace = [{k: v for k, v in t.items() if k != 'thought'} for t in final_res.get('trace', []) if t.get('type') != 'observation']
                         ref_exp = exp_param.strip()
-                        reflection, usage = reflect_on_failure(large_llm, refined_query, ref_exp, small_trace, llm_score)
+                        reflection, usage = reflect_on_failure(large_llm, refined_query, ref_exp, small_trace, llm_score, history)
                         large_calls += 1
                         for k in total_usage: total_usage[k] += usage.get(k, 0)
                         if reflection:

@@ -234,12 +234,9 @@ IMPORTANT:
             if "Action: trace" in self.experience:
                 # Trace level match
                 trace_part = ""
-                reflection_part = ""
                 for line in self.experience.split("\n"):
                     if line.startswith("Trace: "):
                         trace_part = line[7:].strip()
-                    elif line.startswith("Reflection: "):
-                        reflection_part = line[12:].strip()
                 
                 exp_header = (
                     f"\n\n[REFERENCE: VERY HIGH SIMILARITY TRACE]\n"
@@ -249,8 +246,6 @@ IMPORTANT:
                     f"If NO additional tools or info are needed, strictly SKIP all tasks and output ONLY: '1. join()<END_OF_PLAN>'.\n"
                     f"- Recorded Trace:\n{trace_part}\n"
                 )
-                if reflection_part:
-                    exp_header += f"\n- CRITICAL FAILURE NOTES (Avoid these mistakes):\n{reflection_part}\n"
             else:
                 # Experience level match
                 summary_part = ""
@@ -610,15 +605,10 @@ Example Replan:
         if self.experience:
             if "Action: trace" in self.experience:
                 trace_part = ""
-                reflection_part = ""
                 for line in self.experience.split("\n"):
                     if line.startswith("Trace: "):
                         trace_part = line[7:].strip()
-                    elif line.startswith("Reflection: "):
-                        reflection_part = line[12:].strip()
                 exp_header = f"\n[HIGH SIMILARITY REFERENCE TRACE]\n{trace_part}\n"
-                if reflection_part:
-                    exp_header += f"\n[CRITICAL REFLECTION NOTES]\n{reflection_part}\n"
             else:
                 summary_part = ""
                 reflection_part = ""

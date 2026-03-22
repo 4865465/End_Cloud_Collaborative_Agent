@@ -162,77 +162,6 @@ class ExperienceDB:
 
 
 
-def generate_experience_summary(llm, user_query: str, trace: List[Dict[str, Any]], history: List[Dict[str, str]] = []) -> Tuple[str, Dict[str, Any]]:
-    """
-    根据 trace 总结经验，仅在评估分高的情况下调用。
-    """
-    trace_str = json.dumps(trace, ensure_ascii=False, indent=2)
-    history_str = ""
-    if history:
-        for msg in history:
-            role = msg.get("role", "user")
-            content = msg.get("content", "")
-            history_str += f"{role}: {content}\n"
-    else:
-        history_str = "None"
-
-    system_prompt = (
-        "You are a workflow analysis engine. Your ONLY task is to generate a single-sentence experience summary. "
-        "DO NOT provide any analysis, introduction, or reasoning in your response. "
-        "Output ONLY the finalized formula string."
-    )
-
-    exp_instr = (
-        "### OUTPUT FORMAT RULE ###\n"
-        "You must return ONLY a single line starting with 'Experience Summary:'.\n"
-        "Formula: Experience Summary: If the user purpose is [Intent], then the workflow should be [Specific Tool Sequence & Dependencies].\n"
-        "\n"
-        "GUIDELINE FOR [Specific Tool Sequence & Dependencies]:\n"
-        "Describe the parallelizable DAG-style plan. e.g., 'Simultaneously run web_search for A and B, then use llm_inference on $1 and $2 to finalize'.\n"
-        "CRITICAL: Direct answer only. No explanations."
-    )
-
-    user_prompt = (
-        "Analyze the execution trace and provide the best-practice logic.\n\n"
-        f"[Conversation Context]:\n{history_str}\n"
-        f"[User Query]: {user_query}\n"
-        f"[Execution Trace]:\n{trace_str}\n\n"
-        "---"
-        f"{exp_instr}"
-    )
-
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_prompt}
-    ]
-    
-    usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-    try:
-        # Use temperature 0.0 for maximum adherence
-        res = llm.generate(messages, max_tokens=500, temperature=0.1)
-        text = res.get("content", "").strip()
-        # Remove reasoning tags if any
-        text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
-        
-        usage = res.get("usage", usage)
-        
-        # Robust extraction
-        # 1. Priority: If "Experience Summary:" is present, take everything after it
-        match = re.search(r"Experience Summary:\s*(.*)", text, re.DOTALL | re.IGNORECASE)
-        if match:
-            text = match.group(1).strip()
-        else:
-            text = text.strip()
-        # Ensure consistent punctuation
-        if text and not text.endswith("."):
-            text += "."
-        
-        return text, usage
-    except Exception as e:
-        print(f"Failed to generate experience summary: {e}")
-        return "", usage
-
-
 def analyze_task(llm, query: str, history: List[Dict[str, str]]) -> Tuple[str, int, Dict[str, Any]]:
     """
     分析任务：整理意图并初步判断复杂度。
@@ -288,14 +217,24 @@ def analyze_task(llm, query: str, history: List[Dict[str, str]]) -> Tuple[str, i
         print(f"Failed to analyze task: {e}")
         return query, 0, {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
-def reflect_on_failure(large_llm, query: str, ref_exp: str, trace: Any, score: float) -> Tuple[str, Dict[str, Any]]:
+def reflect_on_failure(large_llm, query: str, ref_exp: str, trace: Any, score: float, history: List[Dict[str, str]] = []) -> Tuple[str, Dict[str, Any]]:
     trace_str = json.dumps(trace, ensure_ascii=False, indent=2)
+    history_str = ""
+    if history:
+        for msg in history:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            history_str += f"{role}: {content}\n"
+    else:
+        history_str = "None"
+        
     prompt = (
         f"You are an expert AI agent. A small model was tasked to solve a user query.\n"
-        f"It was provided with a reference past experience/trace, but it still failed and achieved a low score of {score}.\n"
-        f"User Query: {query}\n"
-        f"Reference Experience provided to small model: {ref_exp}\n"
-        f"Small Model's Execution Trace: \n{trace_str}\n\n"
+        f"It was provided with a reference past experience/trace, but it still failed and achieved a low score of {score}.\n\n"
+        f"[Conversation History]:\n{history_str}\n"
+        f"[User Query]: {query}\n"
+        f"[Reference Experience provided to small model]: {ref_exp}\n"
+        f"[Small Model's Execution Trace]:\n{trace_str}\n\n"
         f"Your task is to analyze why the small model failed despite the reference. "
         f"Provide a concise, highly actionable 'Reflection' addressing the gap or common pitfall "
         f"so that future executions will avoid this mistake.\n\n"

@@ -217,15 +217,25 @@ def analyze_task(llm, query: str, history: List[Dict[str, str]]) -> Tuple[str, i
         return query, 0, {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
 
-def reflect_on_failure(large_llm, query: str, ref_exp: str, trace: Any, score: float) -> str:
+def reflect_on_failure(large_llm, query: str, ref_exp: str, trace: Any, score: float, history: List[Dict[str, str]] = []) -> Tuple[str, Dict[str, Any]]:
     trace_str = json.dumps(trace, ensure_ascii=False, indent=2)
+    history_str = ""
+    if history:
+        for msg in history:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            history_str += f"{role}: {content}\n"
+    else:
+        history_str = "None"
+        
     prompt = (
         f"You are an expert AI agent. A small model was tasked to solve a user query.\n"
         f"It was provided with a reference past experience/trace, but it still failed and achieved a low score of {score}.\n"
-        f"User Query: {query}\n"
-        f"Reference Experience provided to small model: {ref_exp}\n"
-        f"Small Model's Execution Trace: \n{trace_str}\n\n"
-        f"Your task is to analyze why the small model failed despite the reference. "
+        f"[Conversation History]:\n{history_str}\n"
+        f"[User Query]: {query}\n"
+        f"[Reference Experience provided to small model]: {ref_exp}\n"
+        f"[Small Model's Execution Trace]:\n{trace_str}\n\n"
+        f"Your task is to analyze why the small model failed despite the reference information. "
         f"Provide a concise, highly actionable 'Reflection' addressing the gap or common pitfall "
         f"so that future executions will avoid this mistake.\n\n"
         f"Reflection:</no_think>"

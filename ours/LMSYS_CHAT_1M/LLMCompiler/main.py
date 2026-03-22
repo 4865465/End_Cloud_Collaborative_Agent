@@ -136,7 +136,6 @@ def run_pipeline(mode: str, sample_size: int = None, eval_enabled: bool = True):
                             raw_trace = exp_data.get("trace", [])
                             filtered_trace = [s for s in raw_trace if s.get("step") in ["Planner Output", "Final Answer"]]
                             
-                            # 构造包含反射内容的字符串
                             trace_json = json.dumps(filtered_trace, ensure_ascii=False)
                             used_experience = f"Action: trace\nTrace: {trace_json}"
                             # 统计下传字节
@@ -159,7 +158,7 @@ def run_pipeline(mode: str, sample_size: int = None, eval_enabled: bool = True):
                         logger.info(f"Task {task['task_id']} is COMPLEX. No experience found. Using large model.")
                         current_agent = LLMCompileAgent(plan_llm=large_llm, exec_llm=large_llm, generate_experience=True)
                         current_method = "large_only (fallback)"
-                
+                print("注入的记忆：",used_experience)
                 result = current_agent.run(user_query, history, experience=used_experience)
                 
                 end_time = time.time()
@@ -197,9 +196,8 @@ def run_pipeline(mode: str, sample_size: int = None, eval_enabled: bool = True):
                 # 创新点3 - 失败经验更新
                 elif FAILURE_EXPERIENCE_UPDATE and "hierarchical" in current_method and llm_score < FAILURE_SCORE_THRESHOLD:
                     logger.info(f"Task {task['task_id']} failed with score {llm_score} using experience. Generating failure reflection...")
-                    # ref_exp = 检索到的参考经验或轨迹内容
-                    ref_exp_content = exp_data.get("experience") if exp_data.get("action") == "experience" else str(exp_data.get("trace"))
-                    reflection_text, ref_usage = reflect_on_failure(large_llm, user_query, ref_exp_content, result.get('trace', []), llm_score)
+                    ref_exp_content = used_experience
+                    reflection_text, ref_usage = reflect_on_failure(large_llm, user_query, ref_exp_content, result.get('trace', []), llm_score, history)
                     
                     if reflection_text:
                         db.update_reflection(exp_data["query"], reflection_text)
