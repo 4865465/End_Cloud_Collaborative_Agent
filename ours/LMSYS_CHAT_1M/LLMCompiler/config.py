@@ -42,8 +42,8 @@ SERPER_API_KEY = os.getenv("SERPER_API_KEY")  # FIXME: Manual entry required
 HF_TOKEN = os.getenv("HF_TOKEN")
 DATASET_NAME = "lmsys/lmsys-chat-1m"
 DATASET_SPLIT = "train"
-SAMPLE_SIZE_Multi = 1 # Default sample size for testing
-SAMPLE_SIZE_Single = 0 # Default sample size for testing
+SAMPLE_SIZE_Multi = 300 # Default sample size for testing
+SAMPLE_SIZE_Single = 100 # Default sample size for testing
 
 # Config tools
 TOOLS_CONFIG = {
@@ -89,9 +89,9 @@ FAILURE_EXPERIENCE_UPDATE = True
 TOOL_SIMILARITY_THRESHOLD = 0.8 # Threshold for tool input similarity
 
 # Embedding Settings
-EMBEDDING_API_KEY = os.getenv("PPINFRA_API_KEY")
-EMBEDDING_API_BASE = os.getenv("PPINFRA_API_BASE")
-# EMBEDDING_MODEL = "Qwen/Qwen3-Embedding-0.6B"
-EMBEDDING_MODEL = "qwen/qwen3-embedding-0.6b"
+EMBEDDING_API_KEY = os.getenv("SMALL_MODEL_API_KEY")
+EMBEDDING_API_BASE = os.getenv("SMALL_MODEL_EMBEDDING_BASE")
+EMBEDDING_MODEL = "Qwen/Qwen3-Embedding-0.6B"
+# EMBEDDING_MODEL = "qwen/qwen3-embedding-0.6b"
 EMBEDDING_USE_LOCAL = False
 EMBEDDING_GPU_ID = 0

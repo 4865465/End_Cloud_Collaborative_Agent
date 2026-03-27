@@ -242,12 +242,17 @@ IMPORTANT:
                         trace_part = line[7:].strip()
                 
                 exp_header = (
-                    f"\n\n[REFERENCE: VERY HIGH SIMILARITY TRACE]\n"
-                    f"The system has detected that this user intent has occurred before with VERY HIGH similarity. "
-                    f"Please carefully review the 'Recorded Trace' (containing Planner Output and Final Answer) below.\n"
-                    f"Decide if the recorded 'Planner Output' and 'Final Answer' are sufficient to address the CURRENT user question. "
-                    f"If NO additional tools or info are needed, strictly SKIP all tasks and output ONLY: '{next_task_id}. join()<END_OF_PLAN>'.\n"
-                    f"- Recorded Trace:\n{trace_part}\n"
+                    f"\n\n[CRITICAL: REUSE PRIOR KNOWLEDGE - SIMILARITY DETECTED]\n"
+                    f"The system has identified a VERY HIGH similarity trace for this request.\n"
+                    f"### GOAL:\n"
+                    f"Minimize redundant tool calls. If the 'Recorded Trace' below already provides the necessary data to solve the current user's request, you MUST NOT generate any new tool tasks.\n\n"
+                    f"### EVALUATION STEP:\n"
+                    f"1. **Redundancy Check**: Analyze if your planned tools and parameters are already represented in the 'Planner Output'. Even if not identical, if they are **semantically equivalent** or the scope of your parameters is **already covered by the trace**, consider the task complete.\n"
+                    f"2. **Final Decision**: If the recorded 'Final Answer' is sufficient based on these similar prior calls, do NOT generate any new tasks. Strictly output: '{next_task_id}. join()<END_OF_PLAN>'.\n\n"
+                    f"### RECORDED TRACE:\n"
+                    f"{trace_part}\n\n"
+                    f"### ATTENTION:\n"
+                    f"If you call a tool to fetch information already present in the trace, it will be considered an efficiency failure. If data is missing or outdated, then proceed with a minimal plan."
                 )
             else:
                 # Experience level match
@@ -260,13 +265,17 @@ IMPORTANT:
                         reflection_part = line[12:].strip()
                 
                 exp_header = (
-                    f"\n\n[REFERENCE: SIMILAR PAST EXPERIENCE]\n"
-                    f"The system has detected that this user intent has occurred before. "
-                    f"Please refer to the following abstracted experience as a guide.\n"
-                    f"- Experience Summary:\n{summary_part}\n"
+                    f"\n\n[CRITICAL: WORKFLOW REPLICATION & INSTANTIATION]\n"
+                    f"A highly relevant past workflow has been identified. You are required to **map the current query onto this proven execution logic**.\n\n"
+                    f"### PROVEN WORKFLOW (The Blueprint):\n"
+                    f"{summary_part}\n\n"
+                    f"### INSTRUCTIONS FOR THE CURRENT QUERY:\n"
+                    f"1. **Analyze Strategy**: Identify the core tool-calling sequence and reasoning steps used in the Experience Summary.\n"
+                    f"2. **Map Variables**: Specifically apply that sequence to the parameters of the CURRENT query. \n"
+                    f"3. **Execute Logic**: Do not just use the tools; replicate the **underlying methodology**. If the previous task used a search or inference logic, apply that same logic to the current data.\n"
                 )
                 if reflection_part:
-                    exp_header += f"\n- CRITICAL FAILURE NOTES (Avoid these mistakes):\n{reflection_part}\n"
+                    exp_header += f"\n- CRITICAL FAILURE NOTES:\n{reflection_part}\n"
             
             exp_header += "\n"
 
