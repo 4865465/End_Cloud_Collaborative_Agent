@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Edge-Cloud Agent Visualization</title>
+  <link rel="stylesheet" href="style.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <!-- Phosphor Icons -->
+  <script src="https://unpkg.com/@phosphor-icons/web"></script>
+</head>
+
+<body>
+  <div class="app-container">
+    <div class="glass-orb orb-1"></div>
+    <div class="glass-orb orb-2"></div>
+
+    <div class="glass-panel sidebar">
+      <div class="panel-header">
+        <i class="ph ph-gear"></i>
+        <h2>System Config</h2>
+      </div>
+
+      <button class="btn-secondary" id="new-chat-btn">
+        <i class="ph ph-plus-circle"></i> New Chat
+      </button>
+
+      <div class="view-switchers" style="display: flex; gap: 10px; margin-bottom: 20px;">
+        <button class="btn-secondary active" id="show-chat-btn" style="flex: 1; margin-bottom: 0;">
+          <i class="ph ph-chat-centered-text"></i> Chat
+        </button>
+        <button class="btn-secondary" id="show-lib-btn" style="flex: 1; margin-bottom: 0;">
+          <i class="ph ph-books"></i> Library
+        </button>
+      </div>
+
+      <div class="config-section">
+        <label>Agent Architecture</label>
+        <select id="agent-type">
+          <option value="react">ReAct Agent</option>
+          <option value="llmcompiler">LLMCompiler Agent</option>
+        </select>
+      </div>
+
+      <div class="config-section">
+        <h3>History</h3>
+        <div id="history-list" class="history-list">
+          <!-- History items will be rendered here -->
+          <div class="empty-history">No history yet</div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="glass-panel main-content-panel" style="padding: 0;">
+      <!-- Chat View -->
+      <div id="chat-view" class="view-container" style="padding: 20px;">
+        <div class="panel-header">
+          <i class="ph ph-chat-centered-text"></i>
+          <h2>Agent Interaction</h2>
+        </div>
+
+        <div class="chat-history" id="chat-history">
+          <div class="message system-msg">System Initialized. Awaiting query...</div>
+        </div>
+
+        <div class="chat-input-area">
+          <input type="text" id="user-input" placeholder="Ask the edge-cloud agent something..." autocomplete="off">
+          <button id="send-btn"><i class="ph ph-paper-plane-right"></i></button>
+        </div>
+      </div>
+
+      <!-- Library View -->
+      <div id="library-view" class="view-container hidden" style="padding: 20px;">
+        <div class="panel-header">
+          <i class="ph ph-books"></i>
+          <h2>Database Library</h2>
+        </div>
+
+        <div class="library-panels" style="display: flex; gap: 15px; flex: 1; min-height: 0;">
+          <div class="lib-sub-panel"
+            style="flex: 1; overflow-y: auto; background: rgba(0,0,0,0.2); border-radius: 12px; padding: 15px;">
+            <h3><i class="ph ph-hard-drives"></i> Edge Tool</h3>
+            <div id="edge-tool-list" class="lib-list"></div>
+          </div>
+          <div class="lib-sub-panel"
+            style="flex: 1; overflow-y: auto; background: rgba(0,0,0,0.2); border-radius: 12px; padding: 15px;">
+            <h3><i class="ph ph-cloud"></i> Cloud Tool</h3>
+            <div id="cloud-tool-list" class="lib-list"></div>
+          </div>
+          <div class="lib-sub-panel"
+            style="flex: 1; overflow-y: auto; background: rgba(0,0,0,0.2); border-radius: 12px; padding: 15px;">
+            <h3><i class="ph ph-brain"></i> Experience</h3>
+            <div id="exp-db-list" class="lib-list"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="right-panels">
+      <div class="glass-panel status-panel">
+        <div class="panel-header">
+          <i class="ph ph-activity"></i>
+          <h2>Real-Time State</h2>
+        </div>
+
+        <div class="panel-content">
+          <div class="state-card">
+            <div class="state-header">Service Location</div>
+            <div class="state-value highlight" id="state-complexity">Idle</div>
+            <small id="state-complexity-desc">Device / Cloud</small>
+          </div>
+        </div>
+      </div>
+
+      <div class="glass-panel cost-panel">
+        <div class="panel-header">
+          <i class="ph ph-coins"></i>
+          <h2>Operation Cost & Stats</h2>
+        </div>
+
+        <div class="panel-content">
+          <div class="cost-metrics-grid">
+            <div class="cost-metric">
+              <i class="ph ph-cpu"></i>
+              <div class="metric-info">
+                <span>LLM Cost (Query/Total)</span>
+                <div><strong id="cost-llm">¥0</strong> / <strong id="total-cost-llm">¥0</strong></div>
+              </div>
+            </div>
+
+            <div class="cost-metric">
+              <i class="ph ph-lightning"></i>
+              <div class="metric-info">
+                <span>Latency</span>
+                <strong id="cost-time">0.0 s</strong>
+              </div>
+            </div>
+
+            <div class="cost-metric">
+              <i class="ph ph-magnifying-glass"></i>
+              <div class="metric-info">
+                <span>Search Tool (Query/Total)</span>
+                <div><strong id="cost-search">0</strong> / <strong id="total-search">0</strong></div>
+              </div>
+            </div>
+
+            <div class="cost-metric">
+              <i class="ph ph-code"></i>
+              <div class="metric-info">
+                <span>Code Tool (Query/Total)</span>
+                <div><strong id="cost-code">¥0</strong> / <strong id="total-cost-code">¥0</strong></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="config-divider"></div>
+
+          <div class="config-section-mini">
+            <h3>Optimization & Thresholds</h3>
+            <div class="innovation-group-main">
+              <div class="toggle-group-small" style="grid-column: span 2;">
+                <div class="toggle-label-small">
+                  <span>Innovation 1</span>
+                  <small>Hierarchical Retrieval</small>
+                </div>
+                <label class="switch-small">
+                  <input type="checkbox" id="toggle-retrieval" checked>
+                  <span class="slider-small round"></span>
+                </label>
+              </div>
+              <div class="input-group-mini-row">
+                <label>T1</label>
+                <input type="number" id="threshold-t1" min="0" max="1" step="0.01" value="0.9">
+              </div>
+              <div class="input-group-mini-row">
+                <label>T2</label>
+                <input type="number" id="threshold-t2" min="0" max="1" step="0.01" value="0.6">
+              </div>
+            </div>
+
+            <div class="innovation-toggles" style="margin-top: 10px;">
+              <div class="toggle-group-small" style="display: flex; align-items: center; gap: 8px;">
+                <div class="toggle-label-small" style="flex: 1;">
+                  <span>Innovation 2</span>
+                  <small>Tool Memory Lib</small>
+                </div>
+                <div class="input-group-mini-row" style="margin-right: 5px;">
+                  <label title="Tool Similarity Threshold">Sim</label>
+                  <input type="number" id="threshold-sim" min="0" max="1" step="0.01" value="0.9" style="width: 50px;">
+                </div>
+                <label class="switch-small">
+                  <input type="checkbox" id="toggle-memory" checked>
+                  <span class="slider-small round"></span>
+                </label>
+              </div>
+              <div class="toggle-group-small">
+
+
+                <div class="toggle-label-small">
+                  <span>Innovation 3</span>
+                  <small>Failure Reflection</small>
+                </div>
+                <label class="switch-small">
+                  <input type="checkbox" id="toggle-failure" checked>
+                  <span class="slider-small round"></span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div class="config-section-mini">
+            <h3>Memory Configuration</h3>
+            <div class="input-group-mini">
+              <label>Short-term Memory Size</label>
+              <input type="number" id="memory-size" min="1" max="20" value="5">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="glass-panel memory-panel">
+        <div class="panel-header">
+          <i class="ph ph-stack"></i>
+          <h2>Short-Term Memory Queue</h2>
+        </div>
+        <div class="panel-content">
+          <div class="memory-queue" id="memory-queue-list">
+            <!-- Queue items will be rendered here -->
+            <div class="empty-queue">Queue is empty</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script src="app.js"></script>
+</body>
+
+</html>

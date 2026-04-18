@@ -12,9 +12,9 @@ except ImportError:
 
 # API Config
 # Large Model (GPT-4/Deepseek level)
-LARGE_MODEL_API_KEY = os.getenv("OPENROUTER_API_KEY")
-LARGE_MODEL_API_BASE = os.getenv("OPENROUTER_API_BASE")
-LARGE_MODEL_NAME = "deepseek/deepseek-v3.2"
+LARGE_MODEL_API_KEY = os.getenv("DEEPSEEK_API_KEY")
+LARGE_MODEL_API_BASE = os.getenv("DEEPSEEK_API_BASE")
+LARGE_MODEL_NAME = "deepseek-v3.2"
 
 # Small Model (Qwen level)
 SMALL_MODEL_API_KEY = os.getenv("SMALL_MODEL_API_KEY")

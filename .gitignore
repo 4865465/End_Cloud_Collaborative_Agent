@@ -2,3 +2,4 @@ testcode
 __pycache__
 .env
 *.txt
+*.index

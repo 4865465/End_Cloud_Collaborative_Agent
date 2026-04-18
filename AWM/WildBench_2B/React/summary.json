@@ -1,0 +1,15 @@
+{
+    "mode": "hybrid",
+    "processed_count": 600,
+    "avg_latency": 42.38665844082832,
+    "avg_large_calls": 3.5766666666666667,
+    "avg_small_calls": 1.2,
+    "avg_prompt_tokens": 4705.573333333334,
+    "avg_completion_tokens": 1115.375,
+    "avg_total_tokens": 5820.948333333334,
+    "avg_llm_score": 6.505,
+    "avg_search_calls": 1.555,
+    "avg_code_tokens": 179.89,
+    "avg_edge_to_cloud_kb": 2.7570393880208335,
+    "avg_cloud_to_edge_kb": 3.019736328125
+}

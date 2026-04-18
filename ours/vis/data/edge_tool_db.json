@@ -1,0 +1,10 @@
+{
+  "web_search": [
+    {
+      "tool_name": "web_search",
+      "tool_input": "{\"query\": \"猫的详细介绍\"}",
+      "tool_output": "{\"status\": \"success\", \"result\": \"貓- 維基百科，自由的百科全書: 貓（英語：cat）通常指家貓（學名：Felis catus，英語：domestic/house cat），是一種家養小型食肉哺乳動物，屬小型貓科動物。根據遺傳學及考古學分析，人類養貓的紀錄可追溯 ...\\n人類是如何馴服貓? 家貓的由來! 【史考特】 - YouTube: 加入會員: https://www.youtube.com/channel/UChkvwGyHIFUZmW35z0NEsUw/join FB粉絲團: https://www.facebook.com/WalkingWildScotty IG: ...\\n猫_百度百科: 猫作为性情温顺，聪明活泼的动物，作为家庭宠物已经有长久的历史，在欧美国家，家猫程度尤其很高。在20世纪初，美国的一名动物学家首次发明了猫树（cat tree，猫爬架）这种 ...\\n貓- 維基百科，自由嘅百科全書: 家貓（粵拼：gaa1 maau1），日常講嘢通常就噉簡稱貓，係一種小型嘅貓科動物。家貓係野貓（Felis silvestris，又叫斑貓）嘅亞種，之所以會畀人嗌做「家」貓，係因為佢哋喺人類嘅屋 ...\\n世界上最大的貓！溫柔的巨人緬因貓（上） 被40隻大貓 ... - YouTube: 今天我們來到了一個會讓貓奴瘋狂的地方這裡有40隻又大又親人的緬因貓Main coon 緬因貓是世界上最大的（家）貓溫柔巨大的貓身裝著像狗狗一樣友善熱情的 ...\"}",
+      "global_idx": 0
+    }
+  ]
+}
