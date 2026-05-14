@@ -1,0 +1,52 @@
+{
+  "query": "你是谁？",
+  "refined_query": "询问我的身份或背景信息",
+  "history": [
+    {
+      "role": "user",
+      "content": "目前F1大红牛队的主力车手是谁"
+    },
+    {
+      "role": "assistant",
+      "content": "目前（2026赛季）F1大红牛队（Oracle Red Bull Racing）的主力车手是：\n1. **马克斯·维斯塔潘（Max Verstappen）** - 卫冕世界冠军，自2016年起效力于红牛车队。\n2. **伊萨克·哈贾尔（Isack Hadjar）** - 法国新秀车手，在2025年完成F1首秀后，于2026年晋升至红牛主队，成为维斯塔潘的队友。\n\n红牛车队在2026年初正式公布了这一车手阵容，取代了之前的塞尔吉奥·佩雷兹（Sergio Pérez）。因此，当前红牛一队的两位正式车手就是维斯塔潘和哈贾尔。"
+    },
+    {
+      "role": "user",
+      "content": "介绍一下维斯塔潘"
+    },
+    {
+      "role": "assistant",
+      "content": "马克斯·维斯塔潘（Max Emilian Verstappen）是一位荷兰赛车手，1997年9月30日出生于比利时哈塞尔特。他出生于赛车世家，父亲是前F1车手乔斯·维斯塔潘（Jos Verstappen），母亲苏菲·库彭（Sophie Kumpen）是一位成功的赛车手。维斯塔潘自幼展现出卓越的赛车天赋，曾在三级方程式赛车（F3）中8次夺冠，并于2015年正式加入一级方程式赛车（F1）。\n\n维斯塔潘在2016年加入红牛车队，迅速崭露头角，并在2021年和2022年连续两年夺得F1世界冠军。他以出色的驾驶技术和顽强的斗志著称，被认为是F1历史上最优秀的车手之一。目前，他效力于红牛车队，与队友伊萨克·哈贾尔（Isack Hadjar）一起征战2026赛季。"
+    }
+  ],
+  "full_res": {
+    "task_id": null,
+    "question": "你是谁？",
+    "refined_query": "询问我的身份或背景信息",
+    "answer": "我是DeepSeek AI助手，由深度求索公司开发的智能对话模型。我可以帮助您解答问题、提供信息、协助分析，并支持多种工具（如网络搜索、计算器、代码生成等）来完成各种任务。\n\n如果您有任何问题或需要帮助，请随时告诉我！",
+    "metrics": {
+      "latency_seconds": 25.46,
+      "large_model_calls": 1,
+      "small_model_calls": 1,
+      "token_usage": {
+        "prompt_tokens": 2184,
+        "completion_tokens": 60,
+        "total_tokens": 2244
+      },
+      "llm_judge_score": 0.0,
+      "edge_to_cloud_kb": 1.6,
+      "cloud_to_edge_kb": 0.294,
+      "search_calls": 0,
+      "code_input_tokens": 0,
+      "code_output_tokens": 0
+    },
+    "trace": [],
+    "experience_summary": null,
+    "used_experience": "",
+    "exp_data": {},
+    "model": "large",
+    "method": "hybrid_large_fallback",
+    "category": 0
+  },
+  "agent_type": "react"
+}

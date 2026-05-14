@@ -19,7 +19,7 @@ LARGE_MODEL_NAME = "deepseek-v3.2"
 # Small Model (Qwen level)
 SMALL_MODEL_API_KEY = os.getenv("SMALL_MODEL_API_KEY")
 SMALL_MODEL_API_BASE = os.getenv("SMALL_MODEL_API_BASE")
-SMALL_MODEL_NAME = "Qwen/Qwen3-8B"
+SMALL_MODEL_NAME = "Qwen/Qwen3-1.7B"
 # SMALL_MODEL_NAME = "Qwen/Qwen3.5-2B"
 # Code Generator (Deepseek level)
 CODE_GENERATOR_API_KEY = os.getenv("PPINFRA_API_KEY")

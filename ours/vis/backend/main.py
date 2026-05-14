@@ -1,33 +1,55 @@
-import sys
 import os
 import json
 import asyncio
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+import re
+from pathlib import Path
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from agent_runner import AgentRunner, AGENT_BASE_DIR
-from typing import Dict, Any, List, Optional
+from agent_runner import AgentRunner
+from typing import Dict, Any
 app = FastAPI()
 
 # Ensure history directory exists
-HISTORY_DIR = "/home/gujing/Graduation_Design/ours/vis/data/history"
-os.makedirs(HISTORY_DIR, exist_ok=True)
+BASE_DIR = Path("/home/gujing/Graduation_Design/ours/vis")
+HISTORY_DIR = BASE_DIR / "data" / "history"
+HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+def history_path(conv_id: str) -> Path:
+    if not conv_id or not SAFE_ID_RE.fullmatch(conv_id):
+        raise HTTPException(status_code=400, detail="Invalid conversation id")
+    return HISTORY_DIR / f"{conv_id}.json"
 
 class ConnectionManager:
     def __init__(self):
         self.active_connections: list[WebSocket] = []
-        self.agent_runner = AgentRunner(self.broadcast)
+        self.agent_runners: dict[WebSocket, AgentRunner] = {}
+        self.feedback_runner = AgentRunner(self.noop_broadcast)
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
         self.active_connections.append(websocket)
+        self.agent_runners[websocket] = AgentRunner(self.make_sender(websocket))
 
     def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+        self.agent_runners.pop(websocket, None)
 
-    async def broadcast(self, message: dict):
-        for connection in self.active_connections:
-            await connection.send_text(json.dumps(message))
+    async def noop_broadcast(self, message: dict):
+        return
+
+    def make_sender(self, websocket: WebSocket):
+        async def send(message: dict):
+            payload = json.dumps(message, ensure_ascii=False)
+            try:
+                await websocket.send_text(payload)
+            except Exception:
+                self.disconnect(websocket)
+        return send
+
+    def runner_for(self, websocket: WebSocket) -> AgentRunner:
+        return self.agent_runners[websocket]
 
 manager = ConnectionManager()
 
@@ -40,7 +62,7 @@ app.add_middleware(
 )
 
 @app.get("/api/library")
-def get_library():
+def get_library(agent_type: str = "react"):
     def load_json(filepath):
         if os.path.exists(filepath):
             with open(filepath, 'r', encoding='utf-8') as f:
@@ -53,7 +75,8 @@ def get_library():
     cloud_tool = load_json("/home/gujing/Graduation_Design/ours/vis/data/cloud_tool_db.json")
     edge_tool = load_json("/home/gujing/Graduation_Design/ours/vis/data/edge_tool_db.json")
     
-    agent_type = manager.agent_runner.config_state["agent_type"]
+    if agent_type not in {"react", "llmcompiler"}:
+        agent_type = "react"
     db_filename = "react_experience_db.json" if agent_type == "react" else "llm_compiler_experience_db.json"
     exp_db_path = f"/home/gujing/Graduation_Design/ours/vis/data/{db_filename}"
     exp_db_records = load_json(exp_db_path) if os.path.exists(exp_db_path) else []
@@ -78,82 +101,85 @@ def get_library():
 @app.get("/api/history")
 def get_all_history():
     history_list = []
-    if os.path.exists(HISTORY_DIR):
-        for filename in os.listdir(HISTORY_DIR):
-            if filename.endswith(".json"):
-                path = os.path.join(HISTORY_DIR, filename)
-                try:
-                    with open(path, 'r', encoding='utf-8') as f:
-                        data = json.load(f)
-                        history_list.append({
-                            "id": data.get("id"),
-                            "title": data.get("title", "Unknown Chat"),
-                            "timestamp": data.get("timestamp")
-                        })
-                except:
-                    pass
+    for path in HISTORY_DIR.glob("*.json"):
+        try:
+            with path.open('r', encoding='utf-8') as f:
+                data = json.load(f)
+                history_list.append({
+                    "id": data.get("id"),
+                    "title": data.get("title", "Unknown Chat"),
+                    "timestamp": data.get("timestamp")
+                })
+        except Exception:
+            pass
     history_list.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
     return history_list
 
 @app.get("/api/history/{conv_id}")
 def get_conversation(conv_id: str):
-    path = os.path.join(HISTORY_DIR, f"{conv_id}.json")
-    if os.path.exists(path):
-        with open(path, 'r', encoding='utf-8') as f:
+    path = history_path(conv_id)
+    if path.exists():
+        with path.open('r', encoding='utf-8') as f:
             return json.load(f)
-    return {"error": "Not found"}
+    raise HTTPException(status_code=404, detail="Conversation not found")
 
 @app.post("/api/history/save")
 def save_conversation(data: Dict[str, Any]):
     conv_id = data.get("id")
-    if not conv_id:
-        return {"error": "No ID provided"}
-    path = os.path.join(HISTORY_DIR, f"{conv_id}.json")
-    with open(path, 'w', encoding='utf-8') as f:
+    path = history_path(conv_id)
+    with path.open('w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
     return {"status": "success"}
 
 @app.delete("/api/history/{conv_id}")
 def delete_conversation(conv_id: str):
-    path = os.path.join(HISTORY_DIR, f"{conv_id}.json")
-    if os.path.exists(path):
-        os.remove(path)
+    path = history_path(conv_id)
+    if path.exists():
+        path.unlink()
         return {"status": "success"}
-    return {"error": "Not found"}
+    raise HTTPException(status_code=404, detail="Conversation not found")
 
 @app.post("/api/feedback")
 async def submit_feedback(data: Dict[str, Any]):
     print(f"--- Feedback Received: ID={data.get('msg_id')} | Status={data.get('status')} ---")
-    await manager.agent_runner.handle_feedback(data.get("status"), data.get("msg_id"))
+    await manager.feedback_runner.handle_feedback(data.get("status"), data.get("msg_id"))
     return {"status": "success"}
 
 @app.websocket("/ws/agent")
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
+    runner = manager.runner_for(websocket)
     try:
         while True:
             data = await websocket.receive_text()
-            payload = json.loads(data)
+            try:
+                payload = json.loads(data)
+            except json.JSONDecodeError:
+                await websocket.send_json({"type": "error", "content": "Invalid JSON payload"})
+                continue
             
             if payload.get("type") == "config":
                 # Update config in agent runner
-                await manager.agent_runner.update_config(payload.get("data", {}))
+                await runner.update_config(payload.get("data", {}))
                 
             elif payload.get("type") == "clear_memory":
                 # Clear short-term memory
-                await manager.agent_runner.clear_memory()
+                await runner.clear_memory()
                 
             elif payload.get("type") == "query":
                 # User sent a message, start agent processing
-                asyncio.create_task(manager.agent_runner.process_query(payload.get("text", "")))
+                asyncio.create_task(runner.process_query(payload.get("text", "")))
                 
             elif payload.get("type") == "load_conversation":
                 # Restore backend state
-                await manager.agent_runner.load_conversation(payload.get("data", {}))
+                await runner.load_conversation(payload.get("data", {}))
+
+            elif payload.get("type") == "feedback":
+                await runner.handle_feedback(payload.get("status"), payload.get("msg_id"))
                 
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8002)
+    uvicorn.run(app, host="127.0.0.1", port=8011)

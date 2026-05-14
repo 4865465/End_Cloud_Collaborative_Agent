@@ -7,9 +7,11 @@ import logging
 from io import StringIO
 import contextlib
 import re
+import importlib.util
 # Import backend specific configurations and dependencies dynamically
 AGENT_BASE_DIR = "/home/gujing/Graduation_Design/ours/vis/agent_core"
 STATES_DIR = "/home/gujing/Graduation_Design/ours/vis/data/execution_states"
+AGENT_RUNTIME_LOCK = asyncio.Lock()
 
 class WsLogHandler(logging.Handler):
     def __init__(self, broadcast_callback):
@@ -46,9 +48,10 @@ class AgentRunner:
             "agent_type": "react",
             "memory_size": 5,
             "innovations": {"retrieval": True, "memory": True, "failure": True},
-            "thresholds": {"t1": 0.9, "t2": 0.6}
+            "thresholds": {"t1": 0.9, "t2": 0.6, "sim": 0.9}
         }
         self.memory_queue = []
+        self._state_lock = asyncio.Lock()
         
         # Cumulative stats (Persistent across queries, cleared on new chat)
         self.total_llm_cost = 0.0
@@ -67,7 +70,39 @@ class AgentRunner:
         self.last_execution_state = None # Keep for backward compatibility if needed
 
     async def update_config(self, new_config):
-        self.config_state.update(new_config)
+        async with self._state_lock:
+            await self._update_config_unlocked(new_config)
+
+    async def _update_config_unlocked(self, new_config):
+        if not isinstance(new_config, dict):
+            return
+
+        agent_type = new_config.get("agent_type")
+        if agent_type in {"react", "llmcompiler"}:
+            self.config_state["agent_type"] = agent_type
+
+        if "memory_size" in new_config:
+            try:
+                self.config_state["memory_size"] = max(1, min(20, int(new_config["memory_size"])))
+            except (TypeError, ValueError):
+                pass
+
+        innovations = new_config.get("innovations")
+        if isinstance(innovations, dict):
+            for key in ("retrieval", "memory", "failure"):
+                if key in innovations:
+                    self.config_state["innovations"][key] = bool(innovations[key])
+
+        thresholds = new_config.get("thresholds")
+        if isinstance(thresholds, dict):
+            for key, default in (("t1", 0.9), ("t2", 0.6), ("sim", 0.9)):
+                if key in thresholds:
+                    try:
+                        value = float(thresholds[key])
+                    except (TypeError, ValueError):
+                        value = default
+                    self.config_state["thresholds"][key] = max(0.0, min(1.0, value))
+
         # Prune memory if size decreased. 
         # Since memory now has roles, memory_size refers to "message pairs" (user + assistant)
         # So total messages = 2 * memory_size
@@ -76,34 +111,52 @@ class AgentRunner:
         await self.broadcast({"type": "memory_queue", "items": self.memory_queue})
 
     async def clear_memory(self):
-        self.memory_queue = []
-        # Clear cumulative stats too
-        self.total_llm_cost = 0.0
-        self.total_search_count = 0
-        self.total_code_cost = 0.0
-        await self.broadcast({"type": "memory_queue", "items": self.memory_queue})
-        await self.broadcast({
-            "type": "cost", 
-            "llm_cost": 0.0, 
-            "total_llm_cost": 0.0,
-            "search_count": 0,
-            "total_search_count": 0,
-            "code_cost": 0.0,
-            "total_code_cost": 0.0,
-            "time_spent": 0.0
-        })
+        async with self._state_lock:
+            self.memory_queue = []
+            # Clear cumulative stats too
+            self.total_llm_cost = 0.0
+            self.total_search_count = 0
+            self.total_code_cost = 0.0
+            await self.broadcast({"type": "memory_queue", "items": self.memory_queue})
+            await self.broadcast({
+                "type": "cost",
+                "llm_cost": 0.0,
+                "total_llm_cost": 0.0,
+                "search_count": 0,
+                "total_search_count": 0,
+                "code_cost": 0.0,
+                "total_code_cost": 0.0,
+                "time_spent": 0.0
+            })
 
     async def load_conversation(self, data):
+        async with self._state_lock:
+            async with AGENT_RUNTIME_LOCK:
+                await self._load_conversation_unlocked(data)
+
+    async def _load_conversation_unlocked(self, data):
         """Restore backend state from a saved conversation"""
+        if not isinstance(data, dict):
+            data = {}
+        stats = data.get("stats", {})
+        if not isinstance(stats, dict):
+            stats = {}
+
         self.memory_queue = data.get("memory", [])
-        self.total_llm_cost = data.get("stats", {}).get("total_llm_cost", 0.0)
-        self.total_search_count = data.get("stats", {}).get("total_search_count", 0)
-        self.total_code_cost = data.get("stats", {}).get("total_code_cost", 0.0)
+        if not isinstance(self.memory_queue, list):
+            self.memory_queue = []
+        self.total_llm_cost = float(stats.get("total_llm_cost", stats.get("totalLlmCost", 0.0)) or 0.0)
+        self.total_search_count = int(stats.get("total_search_count", stats.get("totalSearchCount", 0)) or 0)
+        self.total_code_cost = float(stats.get("total_code_cost", stats.get("totalCodeCost", 0.0)) or 0.0)
         
         # Restore agent_type
-        if "agent_type" in data:
+        if data.get("agent_type") in {"react", "llmcompiler"}:
             self.config_state["agent_type"] = data["agent_type"]
-            self._init_system(data["agent_type"])
+            old_cwd = os.getcwd()
+            try:
+                self._init_system(data["agent_type"])
+            finally:
+                os.chdir(old_cwd)
         
         await self.broadcast({"type": "memory_queue", "items": self.memory_queue})
         await self.broadcast({
@@ -161,7 +214,42 @@ class AgentRunner:
         db_filename = "react_experience_db.json" if agent_type == "react" else "llm_compiler_experience_db.json"
         self.exp_db = ExperienceDB(f"/home/gujing/Graduation_Design/ours/vis/data/{db_filename}")
 
+    def _load_agent_main(self, agent_type):
+        module_name = f"vis_agent_core_{agent_type}_main"
+        module_path = os.path.join(self.agent_dir, "main.py")
+        sys.modules.pop(module_name, None)
+        spec = importlib.util.spec_from_file_location(module_name, module_path)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Unable to load agent main module: {module_path}")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        spec.loader.exec_module(module)
+        return module
+
     async def process_query(self, query: str):
+        if not isinstance(query, str):
+            await self.broadcast({"type": "error", "content": "Query must be a string."})
+            await self.broadcast({"type": "done"})
+            return
+        query = query.strip()
+        if not query:
+            await self.broadcast({"type": "error", "content": "Query cannot be empty."})
+            await self.broadcast({"type": "done"})
+            return
+        async with self._state_lock:
+            async with AGENT_RUNTIME_LOCK:
+                await self._process_query_locked(query)
+
+    def _remember_execution_state(self, msg_id, state):
+        self.last_execution_state = state
+        self.execution_states[msg_id] = state
+        try:
+            with open(os.path.join(STATES_DIR, f"{msg_id}.json"), 'w', encoding='utf-8') as f:
+                json.dump(state, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"Error persisting execution state: {e}")
+
+    async def _process_query_locked(self, query: str):
         # Generate unique ID for this execution
         import uuid
         msg_id = str(uuid.uuid4())
@@ -184,6 +272,8 @@ class AgentRunner:
         final_answer = ""
         complex_mode = False
         mem_hit = False
+        latency = 0.0
+        assistant_recorded = False
 
         try:
             # We run the real process in a background thread
@@ -219,18 +309,11 @@ class AgentRunner:
                 "full_res": full_res,
                 "agent_type": self.config_state["agent_type"]
             }
-            self.last_execution_state = state
-            self.execution_states[msg_id] = state
-            
-            # Persist to disk for restart survival
-            try:
-                with open(os.path.join(STATES_DIR, f"{msg_id}.json"), 'w', encoding='utf-8') as f:
-                    json.dump(state, f, ensure_ascii=False, indent=2)
-            except Exception as e:
-                print(f"Error persisting execution state: {e}")
+            self._remember_execution_state(msg_id, state)
 
             # Add assistant response to memory
             self.memory_queue.append({"role": "assistant", "content": final_answer})
+            assistant_recorded = True
             if len(self.memory_queue) > 2 * self.config_state["memory_size"]:
                 self.memory_queue.pop(0)
             await self.broadcast({"type": "memory_queue", "items": self.memory_queue})
@@ -276,16 +359,55 @@ class AgentRunner:
             
         except Exception as e:
             final_answer = f"Error during execution: {str(e)}"
+            latency = time.time() - start_time
+            state = {
+                "query": query,
+                "refined_query": query,
+                "history": [m for m in self.memory_queue[:-1]],
+                "full_res": {
+                    "answer": final_answer,
+                    "trace": [],
+                    "metrics": {"latency_seconds": latency},
+                    "error": str(e)
+                },
+                "agent_type": self.config_state["agent_type"]
+            }
+            self._remember_execution_state(msg_id, state)
             import traceback
             traceback.print_exc()
         finally:
             sys.stdout = old_stdout
             logging.getLogger().removeHandler(ws_handler)
 
+        if final_answer and not assistant_recorded:
+            self.memory_queue.append({"role": "assistant", "content": final_answer})
+            if len(self.memory_queue) > 2 * self.config_state["memory_size"]:
+                self.memory_queue.pop(0)
+            await self.broadcast({"type": "memory_queue", "items": self.memory_queue})
+            await self.broadcast({
+                "type": "cost",
+                "llm_cost": 0.0,
+                "total_llm_cost": self.total_llm_cost,
+                "search_count": 0,
+                "total_search_count": self.total_search_count,
+                "code_cost": 0.0,
+                "total_code_cost": self.total_code_cost,
+                "time_spent": latency
+            })
+
         await self.broadcast({"type": "response", "content": final_answer})
         await self.broadcast({"type": "done"})
 
     async def handle_feedback(self, status: str, msg_id: str = None):
+        async with self._state_lock:
+            async with AGENT_RUNTIME_LOCK:
+                old_cwd = os.getcwd()
+                try:
+                    await self._handle_feedback_unlocked(status, msg_id)
+                finally:
+                    os.chdir(old_cwd)
+
+    async def _handle_feedback_unlocked(self, status: str, msg_id: str = None):
         """Update Innovation 3 reflection if user is unsatisfied"""
         print(f"--- Handling Feedback: status={status}, msg_id={msg_id} ---")
         if status != "unsatisfied":
@@ -369,54 +491,54 @@ class AgentRunner:
 
     def _run_real_logic(self, query, state_callback=None):
         agent_type = self.config_state["agent_type"]
-        self._init_system(agent_type)
-        
-        # history is everything in memory_queue EXCEPT the last user query
-        history_formatted = [m for m in self.memory_queue[:-1]]
-        
-        # Dynamic import from the current agent directory
-        import sys
-        if '' not in sys.path: sys.path.insert(0, '')
-        import main
-        import importlib
-        importlib.reload(main)
-        
-        # Dispatch to core logic
-        if agent_type == "react":
-            from agent import ReactAgent
-            from tool_db import ToolDB
-            tool_db_edge = ToolDB("/home/gujing/Graduation_Design/ours/vis/data/edge_tool_db.json")
-            tool_db_cloud = ToolDB("/home/gujing/Graduation_Design/ours/vis/data/cloud_tool_db.json")
-            agent_small_inst = ReactAgent(self.small_llm, is_edge=True, edge_tool_db=tool_db_edge, cloud_tool_db=tool_db_cloud)
-            agent_large_inst = ReactAgent(self.large_llm, is_edge=False, edge_tool_db=tool_db_edge, cloud_tool_db=tool_db_cloud, generate_experience=True)
-            
-            full_res = main.run_single_query(
-                user_query=query,
-                history=history_formatted,
-                large_llm=self.large_llm,
-                small_llm=self.small_llm,
-                agent_large=agent_large_inst,
-                agent_small=agent_small_inst,
-                exp_db=self.exp_db,
-                evaluator=None, # No auto evaluation in visualizer
-                state_callback=state_callback
-            )
-        else: # llmcompiler
-            from agent import LLMCompileAgent
-            from tool_db import ToolMemoryDB
-            tool_db_edge = ToolMemoryDB("/home/gujing/Graduation_Design/ours/vis/data/edge_tool_db.json")
-            tool_db_cloud = ToolMemoryDB("/home/gujing/Graduation_Design/ours/vis/data/cloud_tool_db.json")
-            
-            # Note: LLMCompiler's run_single_query has 'db' as argument name
-            full_res = main.run_single_query(
-                user_query=query,
-                history=history_formatted,
-                large_llm=self.large_llm,
-                small_llm=self.small_llm,
-                db=self.exp_db,
-                evaluator=None,
-                state_callback=state_callback
-            )
+        old_cwd = os.getcwd()
+        try:
+            self._init_system(agent_type)
+
+            # history is everything in memory_queue EXCEPT the last user query
+            history_formatted = [m for m in self.memory_queue[:-1]]
+
+            # Load the selected agent core main.py without colliding with backend/main.py.
+            main = self._load_agent_main(agent_type)
+
+            # Dispatch to core logic
+            if agent_type == "react":
+                from agent import ReactAgent
+                from tool_db import ToolDB
+                tool_db_edge = ToolDB("/home/gujing/Graduation_Design/ours/vis/data/edge_tool_db.json")
+                tool_db_cloud = ToolDB("/home/gujing/Graduation_Design/ours/vis/data/cloud_tool_db.json")
+                agent_small_inst = ReactAgent(self.small_llm, is_edge=True, edge_tool_db=tool_db_edge, cloud_tool_db=tool_db_cloud)
+                agent_large_inst = ReactAgent(self.large_llm, is_edge=False, edge_tool_db=tool_db_edge, cloud_tool_db=tool_db_cloud, generate_experience=True)
+
+                full_res = main.run_single_query(
+                    user_query=query,
+                    history=history_formatted,
+                    large_llm=self.large_llm,
+                    small_llm=self.small_llm,
+                    agent_large=agent_large_inst,
+                    agent_small=agent_small_inst,
+                    exp_db=self.exp_db,
+                    evaluator=None, # No auto evaluation in visualizer
+                    state_callback=state_callback
+                )
+            else: # llmcompiler
+                from agent import LLMCompileAgent
+                from tool_db import ToolMemoryDB
+                tool_db_edge = ToolMemoryDB("/home/gujing/Graduation_Design/ours/vis/data/edge_tool_db.json")
+                tool_db_cloud = ToolMemoryDB("/home/gujing/Graduation_Design/ours/vis/data/cloud_tool_db.json")
+
+                # Note: LLMCompiler's run_single_query has 'db' as argument name
+                full_res = main.run_single_query(
+                    user_query=query,
+                    history=history_formatted,
+                    large_llm=self.large_llm,
+                    small_llm=self.small_llm,
+                    db=self.exp_db,
+                    evaluator=None,
+                    state_callback=state_callback
+                )
+        finally:
+            os.chdir(old_cwd)
 
         complex_mode = full_res.get("category") == 0
         method = full_res.get("method", "")
