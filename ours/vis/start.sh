@@ -24,7 +24,7 @@ echo "Checking Python dependencies..."
 MISSING_DEPS=$(python -c "import importlib.util; deps={'fastapi':'fastapi','uvicorn':'uvicorn','websockets':'websockets'}; print(' '.join(pkg for pkg, mod in deps.items() if importlib.util.find_spec(mod) is None))")
 if [ -n "$MISSING_DEPS" ]; then
   echo "Missing dependencies: ${MISSING_DEPS}"
-  echo "Install them with: python -m pip install fastapi uvicorn websockets"
+  echo "Install them with: python -m pip install -r requirements.txt"
   exit 1
 fi
 

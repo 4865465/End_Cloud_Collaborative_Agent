@@ -48,6 +48,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let isProcessing = false;
   let reconnectTimer = null;
   let isUnloading = false;
+  let hasUnsavedChanges = false;
 
   const API_BASE = 'http://127.0.0.1:8011';
   const WS_URL = API_BASE.replace(/^http/, 'ws') + '/ws/agent';
@@ -123,6 +124,10 @@ document.addEventListener('DOMContentLoaded', () => {
     };
   }
 
+  function markChatDirty() {
+    hasUnsavedChanges = true;
+  }
+
   function currentConfig() {
     const config = {
       agent_type: agentType.value,
@@ -165,10 +170,12 @@ document.addEventListener('DOMContentLoaded', () => {
     isProcessing = nextValue;
     sendBtn.disabled = nextValue;
     chatInput.disabled = nextValue;
+    newChatBtn.disabled = nextValue;
   }
 
   // --- Persistence Logic (Backend API) ---
   async function saveChatState() {
+    if (!hasUnsavedChanges) return;
     const state = buildChatState();
     if (!state) return;
 
@@ -178,6 +185,7 @@ document.addEventListener('DOMContentLoaded', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(state)
       });
+      hasUnsavedChanges = false;
       renderHistory();
     } catch (e) {
       console.error("Failed to save state to backend", e);
@@ -185,6 +193,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function saveChatStateBeforeUnload() {
+    if (!hasUnsavedChanges) return;
     const state = buildChatState();
     if (!state) return;
     const payload = JSON.stringify(state);
@@ -198,6 +207,7 @@ document.addEventListener('DOMContentLoaded', () => {
         keepalive: true
       });
     }
+    hasUnsavedChanges = false;
   }
 
   async function renderHistory() {
@@ -277,9 +287,10 @@ document.addEventListener('DOMContentLoaded', () => {
       totalSearchCount = readStat(stats, 'total_search_count', 'totalSearchCount');
       totalCodeCost = readStat(stats, 'total_code_cost', 'totalCodeCost');
 
-      shortTermMemory = Array.isArray(item.memoryItems) ? item.memoryItems : [];
+      shortTermMemory = Array.isArray(item.memoryItems) ? item.memoryItems : (Array.isArray(item.memory) ? item.memory : []);
       updateMemoryQueue(shortTermMemory);
-      if (item.agentType) agentType.value = item.agentType;
+      if (item.agentType || item.agent_type) agentType.value = item.agentType || item.agent_type;
+      hasUnsavedChanges = false;
 
       // Restore stats to UI
       totalCostLlm.textContent = `¥${totalLlmCost.toFixed(5)}`;
@@ -307,6 +318,7 @@ document.addEventListener('DOMContentLoaded', () => {
     activeAgentMsgDiv = null;
     currentMsgId = null;
     currentMemoryHit = false;
+    hasUnsavedChanges = false;
     setProcessing(false);
     totalLlmCost = 0;
     totalSearchCount = 0;
@@ -637,6 +649,7 @@ document.addEventListener('DOMContentLoaded', () => {
       btn.parentElement.querySelectorAll('.feedback-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       addSystemMessage(`Feedback received: ${status}`);
+      markChatDirty();
       saveChatState();
     } catch (e) {
       console.error("Feedback failed", e);
@@ -699,6 +712,7 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
     addUserMessage(msg);
+    markChatDirty();
     chatInput.value = '';
     currentMsgId = null; // Reset for new query
     currentMemoryHit = false; // Reset for new query

@@ -1,0 +1,43 @@
+# ============================================================
+# 毕业设计 —— 端云协同 LLM 智能体优化方法
+# Python >= 3.10 推荐
+# ============================================================
+
+# ---- LLM 客户端 / 协议 ----
+openai>=1.40.0
+requests>=2.31.0
+python-dotenv>=1.0.0
+
+# ---- LangChain 生态（ReAct / LLMCompiler 调用链、工具封装、图式编排） ----
+langchain>=0.2.0
+langchain-core>=0.2.0
+langchain-community>=0.2.0
+langchain-google-community>=1.0.0
+langgraph>=0.2.0
+
+# ---- 数据模型与类型 ----
+pydantic>=2.6.0
+typing-extensions>=4.9.0
+
+# ---- 嵌入 / 相似度检索 ----
+sentence-transformers>=2.7.0
+faiss-cpu>=1.8.0
+# 如需 GPU 版本 FAISS，请替换为 faiss-gpu 并自行根据 CUDA 版本安装
+
+# ---- 数值计算 ----
+numpy>=1.24.0
+
+# ---- 数据集加载（WildBench / LMSYS-Chat-1M） ----
+datasets>=2.18.0
+huggingface-hub>=0.23.0
+
+# ---- 进度条与日志 ----
+tqdm>=4.66.0
+
+# ---- 可视化系统（ours/vis） ----
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+websockets>=12.0
+
+# ---- 外部工具 API（可选，按实际启用的工具安装） ----
+google-api-python-client>=2.120.0   # Google CSE 搜索

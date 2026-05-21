@@ -1,0 +1,16 @@
+fastapi
+uvicorn
+websockets
+openai
+numpy
+faiss-cpu
+sentence-transformers
+requests
+python-dotenv
+langchain-core
+langchain-google-community
+langgraph
+pydantic
+datasets
+tqdm
+typing-extensions

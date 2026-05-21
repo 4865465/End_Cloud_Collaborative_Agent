@@ -2,4 +2,5 @@ testcode
 __pycache__
 .env
 *.txt
+!requirements.txt
 *.index
